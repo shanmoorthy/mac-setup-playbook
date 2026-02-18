@@ -1,0 +1,93 @@
+---
+- name: "Shan's Mac Setup"
+  hosts: local
+  become: false
+  vars:
+    cask_apps:
+      - google-chrome
+      - iterm2
+      - itermai
+      - raycast
+      - antigravity
+      - font-meslo-lg-nerd-font
+      - duckduckgo
+
+
+    cli_tools:
+      - zsh
+      - tree
+      - wget
+      - oh-my-posh
+      - git
+      - gh
+      - dockutil
+
+  tasks:
+#    - name: Ensure Homebrew Taps are present
+#      community.general.homebrew_tap:
+#        name:
+#          - homebrew/cask-fonts
+#        state: present
+
+    - name: Install GUI Apps and Fonts
+      community.general.homebrew_cask:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ cask_apps }}"
+
+    - name: Install CLI Tools
+      community.general.homebrew:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ cli_tools }}"
+
+    - name: Check if Oh My Zsh is installed
+      ansible.builtin.stat:
+        path: "{{ ansible_env.HOME }}/.oh-my-zsh"
+      register: oh_my_zsh_stat
+
+    - name: Install Oh My Zsh
+      ansible.builtin.shell: |
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+      when: not oh_my_zsh_stat.stat.exists
+
+    - name: Ensure Oh My Zsh custom plugins directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.oh-my-zsh/custom/plugins"
+        state: directory
+
+    - name: Install Oh My Zsh plugins
+      ansible.builtin.git:
+        repo: "{{ item.repo }}"
+        dest: "{{ ansible_env.HOME }}/.oh-my-zsh/custom/plugins/{{ item.name }}"
+        depth: 1
+      loop:
+        - { name: "zsh-autosuggestions", repo: "https://github.com/zsh-users/zsh-autosuggestions" }
+        - { name: "zsh-syntax-highlighting", repo: "https://github.com/zsh-users/zsh-syntax-highlighting.git" }
+
+    - name: Deploy .zshrc from template
+      ansible.builtin.template:
+        src: templates/zshrc.j2
+        dest: "{{ ansible_env.HOME }}/.zshrc"
+        mode: '0644'
+
+    - name: Remove all items from Dock
+      ansible.builtin.command: dockutil --remove all --no-restart
+      register: dockutil_remove_all
+      failed_when: false # Ignore if dock is already empty or dockutil errors on empty dock
+      changed_when: "'removed' in dockutil_remove_all.stdout or 'all items removed' in dockutil_remove_all.stdout"
+
+    - name: Add applications to Dock
+      ansible.builtin.command: "dockutil --add '{{ item.path }}' --label '{{ item.name }}' --no-restart"
+      loop:
+        - { name: "Google Chrome", path: "/Applications/Google Chrome.app" }
+        - { name: "iTerm", path: "/Applications/iTerm.app" }
+        - { name: "Antigravity", path: "/Applications/Antigravity.app" }
+        - { name: "System Settings", path: "/System/Applications/System Settings.app" }
+      register: dockutil_add_apps
+      changed_when: "'added' in dockutil_add_apps.stdout"
+
+    - name: Restart Dock
+      ansible.builtin.command: killall Dock
+      changed_when: false
+
